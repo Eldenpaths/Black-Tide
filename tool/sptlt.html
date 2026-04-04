@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sea Power Theater Layout Tool (SPTLT)</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #0f1214;
+            --bg-panel: #1a1e23;
+            --border-color: #333a42;
+            --text-main: #e0e0e0;
+            --text-muted: #8a9ba8;
+            --friendly-blue: #4a90e2;
+            --threat-red: #d0021b;
+            --threat-amber: #f5a623;
+            --objective-green: #7ed321;
+            --font-ui: "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            --font-mono: "SF Mono", "Consolas", monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font-ui);
+            color: var(--text-main);
+            background: var(--bg-base);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #topbar {
+            height: 50px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 2000;
+        }
+
+        .branding {
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 250px;
+        }
+        
+        .version-badge {
+            font-size: 10px;
+            background: var(--friendly-blue);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .mode-switcher {
+            display: flex;
+            background: var(--bg-base);
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .mode-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            border-left: 1px solid var(--border-color);
+        }
+        .mode-btn:first-child { border-left: none; }
+        .mode-btn.active { background: #333a42; color: #fff; }
+        .mode-btn:hover:not(.active) { color: #fff; }
+
+        #workspace {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 50px);
+        }
+
+        .sidebar {
+            width: 320px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        #inspector { border-right: none; border-left: 1px solid var(--border-color); }
+
+        .panel-header {
+            padding: 12px 16px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(0,0,0,0.2);
+            font-weight: bold;
+        }
+
+        .panel-content { padding: 16px; overflow-y: auto; flex: 1; }
+
+        .tree-group { margin-bottom: 16px; }
+        .tree-title { font-size: 12px; font-weight: bold; margin-bottom: 8px; color: var(--text-main); }
+        .tree-item {
+            font-size: 13px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            background: var(--bg-base);
+            border: 1px solid transparent;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+        .tree-item:hover { border-color: var(--border-color); }
+        .type-badge { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+        #map-container { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; background: #000; }
+
+        pre.code-block {
+            background: var(--bg-base);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: #a5d6ff;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            margin-bottom: 16px;
+            white-space: pre-wrap;
+        }
+
+        body.mode-briefing .sidebar { display: none; }
+        body.mode-briefing #map-container { width: 100%; }
+        body.mode-briefing .leaflet-tile-pane {
+            filter: grayscale(85%) brightness(55%) contrast(110%) sepia(10%) hue-rotate(190deg);
+        }
+        body.mode-briefing .leaflet-control-zoom { display: none; }
+
+        #briefing-overlay { display: none; position: absolute; top: 20px; left: 20px; z-index: 1000; pointer-events: none; }
+        body.mode-briefing #briefing-overlay { display: block; }
+        
+        .brief-card {
+            background: rgba(15, 18, 20, 0.85);
+            border: 1px solid rgba(80, 90, 100, 0.6);
+            backdrop-filter: blur(4px);
+            padding: 16px;
+            color: #fff;
+            width: 300px;
+        }
+        .brief-class { color: var(--threat-red); font-family: var(--font-mono); font-size: 11px; font-weight: bold; border-bottom: 1px solid #333; padding-bottom: 6px; margin-bottom: 8px;}
+        .brief-title { font-size: 18px; font-weight: bold; margin-bottom: 4px; text-transform: uppercase;}
+        .brief-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+        .tac-icon {
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--font-mono); font-size: 9px; font-weight: bold;
+            border: 2px solid; background: rgba(0,0,0,0.5); color: #fff;
+            box-shadow: 0 0 6px rgba(0,0,0,0.8);
+            cursor: grab;
+        }
+        .tac-icon:active { cursor: grabbing; }
+        .tac-blue { border-color: var(--friendly-blue); background: rgba(74, 144, 226, 0.3); }
+        .tac-hva { width: 30px; height: 18px; }
+        .tac-escort { width: 20px; height: 14px; border-radius: 50%; }
+        .tac-wp { width: 12px; height: 12px; border-color: #fff; border-radius: 50%; background: #000; font-size: 8px;}
+        
+        .map-label {
+            background: none; border: none; box-shadow: none;
+            color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: bold;
+            text-shadow: 1px 1px 2px #000, -1px -1px 2px #000;
+        }
+
+        /* ── HELP OVERLAY ─────────────────────────────────────────── */
+        #help-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 9000;
+            align-items: center;
+            justify-content: center;
+        }
+        #help-overlay.visible {
+            display: flex;
+        }
+
+        #help-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            width: 100%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.8);
+        }
+
+        #help-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        #help-panel-header .help-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--friendly-blue);
+        }
+
+        #help-close {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 16px;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            line-height: 1;
+        }
+        #help-close:hover { color: #fff; border-color: #fff; }
+
+        #help-panel-body {
+            padding: 20px 18px;
+        }
+
+        .help-section {
+            margin-bottom: 22px;
+        }
+        .help-section:last-child { margin-bottom: 0; }
+
+        .help-section-title {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--friendly-blue);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 6px;
+            margin-bottom: 10px;
+        }
+
+        .help-section ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .help-section ul li {
+            font-size: 12.5px;
+            color: var(--text-main);
+            padding: 4px 0 4px 14px;
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .help-section ul li::before {
+            content: '—';
+            position: absolute;
+            left: 0;
+            color: var(--text-muted);
+            font-size: 10px;
+            top: 5px;
+        }
+
+        .help-section .help-note {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            margin-top: 8px;
+            padding: 6px 10px;
+            background: rgba(0,0,0,0.3);
+            border-left: 2px solid var(--border-color);
+        }
+        /* ── END HELP OVERLAY ─────────────────────────────────────── */
+    </style>
+</head>
+<body>
+
+    <div id="topbar">
+        <div class="branding">
+            SPTLT <span class="version-badge">v1.2.0-ALPHA</span>
+        </div>
+        <div class="mode-switcher">
+            <button class="mode-btn active" id="btn-design" onclick="setMode('design')">DESIGN</button>
+            <button class="mode-btn" id="btn-briefing" onclick="setMode('briefing')">BRIEFING</button>
+        </div>
+        <div class="mode-switcher" style="width: 290px; justify-content: flex-end;">
+            <button class="mode-btn" onclick="resetState()">RESET</button>
+            <button class="mode-btn" onclick="document.getElementById('file-load').click()">LOAD</button>
+            <button class="mode-btn" onclick="exportJSON()">SAVE</button>
+            <button class="mode-btn" onclick="toggleHelp()" id="btn-help" style="color: var(--friendly-blue);">HELP</button>
+            <input type="file" id="file-load" accept=".json" style="display:none;" onchange="loadJSON(event)">
+        </div>
+    </div>
+
+    <div id="workspace">
+        <div class="sidebar" id="ledger">
+            <div class="panel-header">Project Ledger</div>
+            <div class="panel-content" id="ledger-content"></div>
+        </div>
+
+        <div id="map-container">
+            <div id="map"></div>
+            <div id="briefing-overlay">
+                <div class="brief-card">
+                    <div class="brief-class">SECRET // NOFORN</div>
+                    <div class="brief-title" id="overlay-title">BLACK TIDE: Mission 1</div>
+                    <div class="brief-meta" id="overlay-meta">DTG: 030559ZAPR26<br>AREA: Strait of Hormuz</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar" id="inspector">
+            <div class="panel-header">Compilation Inspector</div>
+            <div class="panel-content">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Live compiled Sea Power .ini snippets generated from geometry state.</p>
+                <div class="tree-title">Sea Power INI Output</div>
+                <pre class="code-block" id="ini-preview"></pre>
+                <div class="tree-title">BriefingMap XML Helper</div>
+                <pre class="code-block" id="xml-preview"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- HELP OVERLAY -->
+    <div id="help-overlay" onclick="handleOverlayClick(event)">
+        <div id="help-panel">
+            <div id="help-panel-header">
+                <span class="help-title">SPTLT Operator Reference</span>
+                <button id="help-close" onclick="toggleHelp()">✕</button>
+            </div>
+            <div id="help-panel-body">
+
+                <div class="help-section">
+                    <div class="help-section-title">Route Editing</div>
+                    <ul>
+                        <li>Drag Entry, Route nodes, HVA, Choke, and Exit Box to shape the transit path</li>
+                        <li>Click directly on the blue route line to insert a new waypoint at that position</li>
+                        <li>Right-click any numbered waypoint to delete it (minimum 4 waypoints enforced)</li>
+                        <li>Keep the route in water — use extra nodes to bend around islands and shoals</li>
+                        <li>Escorts may also be repositioned to refine the starting screen</li>
+                    </ul>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">Threat Geometry</div>
+                    <ul>
+                        <li>Threat circles represent A2/AD range and influence areas — drag the red center dot to reposition</li>
+                        <li>FAC area is a polygon because littoral operating water is constrained by coast and islands</li>
+                        <li>Click a polygon edge to insert a new vertex; right-click a vertex handle to delete it</li>
+                        <li>Exit area stays a box — it represents a mission completion trigger zone</li>
+                    </ul>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">Coast / Shoal Guides</div>
+                    <ul>
+                        <li>Coast Guide is a manual visual shoreline reference — adjust to match the satellite imagery</li>
+                        <li>Shoal Area marks shallow or restricted water that constrains the viable route corridor</li>
+                        <li>Click polyline edges or polygon edges to add vertices; right-click to remove</li>
+                        <li>Adjust both to help shape playable routes and danger zones before locking geometry</li>
+                    </ul>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">Save / Load / Reset</div>
+                    <ul>
+                        <li>SAVE — downloads the current full state as <span style="font-family:var(--font-mono);color:#a5d6ff">mission_export.json</span></li>
+                        <li>LOAD — restores a previously saved JSON file back into the tool</li>
+                        <li>RESET — wipes all geometry back to the default BLACK TIDE Mission 1 layout</li>
+                    </ul>
+                    <div class="help-note">The exported JSON is the lock reference for translating layout into Sea Power .ini mission files.</div>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">View Modes</div>
+                    <ul>
+                        <li><strong style="color:var(--text-main)">DESIGN</strong> — full editing mode with sidebars, inspector, and all drag handles active</li>
+                        <li><strong style="color:var(--text-main)">BRIEFING</strong> — classified presentation view, hides editing UI, applies intel map filter</li>
+                    </ul>
+                    <div class="help-note">Use browser Print or screenshot in BRIEFING mode to export briefing images.</div>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">Compilation Inspector</div>
+                    <ul>
+                        <li>Right panel shows live Sea Power .ini output generated from current geometry</li>
+                        <li>INI Output covers unit positions and waypoint blocks — paste directly into mission files</li>
+                        <li>BriefingMap XML Helper covers threat circle overlays for briefing map XML</li>
+                        <li>Inspector updates automatically on every drag or geometry edit</li>
+                    </ul>
+                </div>
+
+                <div class="help-section">
+                    <div class="help-section-title">Current Limits</div>
+                    <ul>
+                        <li>Labels are fixed per zone — rename via JSON edit after export</li>
+                        <li>This tool does not auto-detect shoreline or bathymetry — operator judgment required</li>
+                        <li>Corridor offset may degrade on very sharp route bends — add intermediate waypoints to smooth</li>
+                        <li>Final .ini trigger logic must be authored manually after geometry is locked</li>
+                    </ul>
+                    <div class="help-note">SPTLT v1.2.0-ALPHA — internal planning use only. Not yet public-release ready.</div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.currentMode = 'design';
+
+        // ── HELP PANEL ──────────────────────────────────────────────
+        function toggleHelp() {
+            const overlay = document.getElementById('help-overlay');
+            overlay.classList.toggle('visible');
+        }
+
+        function handleOverlayClick(e) {
+            if (e.target === document.getElementById('help-overlay')) {
+                toggleHelp();
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const overlay = document.getElementById('help-overlay');
+                if (overlay.classList.contains('visible')) toggleHelp();
+            }
+        });
+        // ── END HELP PANEL ──────────────────────────────────────────
+
+        let state = {
+            projectMeta: {
+                version: "1.2",
+                operation: "BLACK TIDE",
+                mission: "THE TRIPWIRE",
+                dtg: "030559ZAPR26"
+            },
+            viewport: {
+                operational: { center: [26.05, 56.02], zoom: 8 }
+            },
+            forces: {
+                blue: [
+                    { id: "hva_1", name: "SS Titan (HVA)", type: "HVA", pos: [25.10, 56.55], heading: 320, speedKts: 15 },
+                    { id: "esc_1", name: "USS Arleigh", type: "ESCORT", pos: [25.15, 56.62] },
+                    { id: "esc_2", name: "USS Halsey", type: "ESCORT", pos: [25.18, 56.48] }
+                ]
+            },
+            routes: [
+                {
+                    id: "route_main",
+                    assignedTo: ["hva_1"],
+                    corridorWidthNm: 6,
+                    waypoints: [
+                        { id: "wp_1", pos: [25.10, 56.55], action: "START" },
+                        { id: "wp_2", pos: [25.90, 56.45], action: "TRANSIT" },
+                        { id: "wp_3", pos: [26.45, 56.40], action: "CHOKEPOINT" },
+                        { id: "wp_4", pos: [26.85, 55.40], action: "EXIT" }
+                    ]
+                }
+            ],
+            zones: [
+                { id: "zone_exit", name: "TRANSIT COMPLETE", type: "COMPLETION", shape: "BOX", bounds: [[26.70, 55.20], [27.00, 55.60]] },
+                { id: "threat_1", name: "BANDAR ABBAS A2/AD", type: "COASTAL_MISSILE", shape: "CIRCLE", center: [27.15, 56.20], radiusNm: 45 },
+                { id: "threat_2", name: "QESHM FAC PATROL", type: "FAC_AREA", shape: "POLYGON", points: [[26.70, 56.65], [26.50, 56.25], [26.35, 56.45], [26.60, 56.80]] },
+                { id: "guide_coast", name: "COAST GUIDE", type: "ENVIRONMENT", shape: "POLYLINE", points: [[26.8, 56.1], [26.9, 56.3], [27.0, 56.15]] },
+                { id: "guide_shoal", name: "SHOAL AREA", type: "ENVIRONMENT", shape: "POLYGON", points: [[26.6, 55.8], [26.7, 55.9], [26.55, 56.0]] }
+            ]
+        };
+
+        const defaultState = JSON.parse(JSON.stringify(state));
+
+        const map = L.map('map', { zoomControl: true, attributionControl: false }).setView(state.viewport.operational.center, state.viewport.operational.zoom);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 14
+        }).addTo(map);
+
+        const layers = {
+            zones: L.layerGroup().addTo(map),
+            corridors: L.layerGroup().addTo(map),
+            routes: L.layerGroup().addTo(map),
+            forces: L.layerGroup().addTo(map),
+            labels: L.layerGroup().addTo(map)
+        };
+
+        const nmToMeters = (nm) => nm * 1852;
+
+        function getInsertIndex(points, latlng, isPolygon) {
+            let minDist = Infinity;
+            let bestIdx = 1;
+            try {
+                const pt = turf.point([latlng.lng, latlng.lat]);
+                const len = points.length;
+                for(let i=0; i < len; i++) {
+                    if(i === len - 1 && !isPolygon) break;
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % len];
+                    if(p1[0]===p2[0] && p1[1]===p2[1]) continue;
+                    const line = turf.lineString([ [p1[1], p1[0]], [p2[1], p2[0]] ]);
+                    const dist = turf.pointToLineDistance(pt, line);
+                    if(dist < minDist) {
+                        minDist = dist;
+                        bestIdx = i + 1;
+                    }
+                }
+            } catch(e) { console.warn(e); }
+            return bestIdx === points.length && isPolygon ? points.length : bestIdx;
+        }
+
+        function renderLedger() {
+            const container = document.getElementById('ledger-content');
+            let html = `<div class="tree-group"><div class="tree-title">BLUE FORCES</div>`;
+            state.forces.blue.forEach(f => {
+                html += `<div class="tree-item"><span>${f.name}</span> <span class="type-badge">${f.type}</span></div>`;
+            });
+            html += `</div><div class="tree-group"><div class="tree-title">ROUTE WAYPOINTS</div>`;
+            state.routes[0].waypoints.forEach(wp => {
+                html += `<div class="tree-item"><span>${wp.id.toUpperCase()}</span> <span class="type-badge">${wp.action}</span></div>`;
+            });
+            html += `</div><div class="tree-group"><div class="tree-title">GEOMETRY ZONES</div>`;
+            state.zones.forEach(z => {
+                html += `<div class="tree-item"><span>${z.name}</span> <span class="type-badge">${z.shape}</span></div>`;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        function createDraggableMarker(latlng, htmlClass, label, onDragEnd, onContextMenu = null) {
+            const isDesign = window.currentMode === 'design';
+            const icon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="tac-icon ${htmlClass}" style="${!isDesign ? 'pointer-events:none; cursor:default;' : ''}">${label}</div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            const marker = L.marker(latlng, { icon: icon, draggable: isDesign, interactive: isDesign });
+            if (isDesign) {
+                marker.on('dragend', function(e) {
+                    const newPos = e.target.getLatLng();
+                    onDragEnd([newPos.lat, newPos.lng]);
+                    renderMap();
+                    updateInspector();
+                });
+                if (onContextMenu) {
+                    marker.on('contextmenu', function(e) { onContextMenu(); });
+                }
+            }
+            return marker;
+        }
+
+        function drawCorridor(waypointsGeo, widthNm) {
+            if (waypointsGeo.length < 2) return;
+            const line = turf.lineString(waypointsGeo.map(p => [p[1], p[0]]));
+            try {
+                const offsetNm = widthNm / 2;
+                const offsetMiles = offsetNm * 1.15078;
+                const rightLine = turf.lineOffset(line, offsetMiles, {units: 'miles'});
+                const leftLine = turf.lineOffset(line, -offsetMiles, {units: 'miles'});
+                const rightCoords = rightLine.geometry.coordinates.map(p => [p[1], p[0]]);
+                const leftCoords = leftLine.geometry.coordinates.map(p => [p[1], p[0]]);
+                L.polyline(rightCoords, { color: '#4A90E2', weight: 1, dashArray: '5, 10', opacity: 0.6, interactive: false }).addTo(layers.corridors);
+                L.polyline(leftCoords, { color: '#4A90E2', weight: 1, dashArray: '5, 10', opacity: 0.6, interactive: false }).addTo(layers.corridors);
+            } catch (e) {
+                console.warn("Turf corridor generation failed on sharp angle.");
+            }
+        }
+
+        function renderMap() {
+            Object.values(layers).forEach(layer => layer.clearLayers());
+            const isDesign = window.currentMode === 'design';
+
+            state.zones.forEach(z => {
+                if (z.shape === 'BOX') {
+                    L.rectangle(z.bounds, { color: '#7ED321', weight: 2, fillColor: '#7ED321', fillOpacity: 0.1, dashArray: '5, 5', interactive: false }).addTo(layers.zones);
+                    L.marker(z.bounds[0], { interactive:false, icon: L.divIcon({ className: 'map-label', html: `<span style="color:#7ED321">${z.name}</span>`, iconAnchor: [-10, 20]}) }).addTo(layers.labels);
+                }
+                if (z.shape === 'CIRCLE') {
+                    if (isDesign) {
+                        const centerMarker = L.marker(z.center, { 
+                            draggable: true, 
+                            icon: L.divIcon({ className: 'custom-div-icon', html: `<div class="tac-icon tac-wp" style="background:#D0021B; border-color:#D0021B;"></div>`, iconSize:[12,12], iconAnchor:[6,6] })
+                        }).addTo(layers.zones);
+                        centerMarker.on('drag', function(e) {
+                            circle.setLatLng(e.target.getLatLng());
+                            label.setLatLng(e.target.getLatLng());
+                        });
+                        centerMarker.on('dragend', function(e) {
+                            const newPos = e.target.getLatLng();
+                            z.center = [newPos.lat, newPos.lng];
+                            renderMap();
+                            updateInspector();
+                        });
+                    }
+                    const circle = L.circle(z.center, { radius: nmToMeters(z.radiusNm), color: '#D0021B', weight: 1.5, fillColor: '#D0021B', fillOpacity: 0.15, dashArray: '8, 8', interactive: false }).addTo(layers.zones);
+                    const label = L.marker(z.center, { interactive:false, icon: L.divIcon({ className: 'map-label', html: `<span style="color:#D0021B">${z.name}</span>`, iconAnchor: [0, 0]}) }).addTo(layers.labels);
+                }
+                if (z.shape === 'POLYGON') {
+                    let color = '#F5A623';
+                    if (z.type === 'ENVIRONMENT') color = '#4db8ff';
+                    const poly = L.polygon(z.points, { color: color, weight: 2, fillColor: color, fillOpacity: 0.15, interactive: isDesign }).addTo(layers.zones);
+                    L.marker(z.points[0], { interactive:false, icon: L.divIcon({ className: 'map-label', html: `<span style="color:${color}">${z.name}</span>`, iconAnchor: [0, -10]}) }).addTo(layers.labels);
+                    if (isDesign) {
+                        poly.on('click', (e) => {
+                            const idx = getInsertIndex(z.points, e.latlng, true);
+                            z.points.splice(idx, 0, [e.latlng.lat, e.latlng.lng]);
+                            renderMap(); updateInspector(); renderLedger();
+                        });
+                        z.points.forEach((pt, idx) => {
+                            createDraggableMarker(pt, 'tac-wp', '', 
+                                (newPos) => { z.points[idx] = newPos; },
+                                () => { if(z.points.length > 3) { z.points.splice(idx, 1); renderMap(); updateInspector(); renderLedger(); } }
+                            ).addTo(layers.zones);
+                        });
+                    }
+                }
+                if (z.shape === 'POLYLINE') {
+                    let color = '#a67c52';
+                    const poly = L.polyline(z.points, { color: color, weight: 3, dashArray: '4, 4', interactive: isDesign }).addTo(layers.zones);
+                    L.marker(z.points[0], { interactive:false, icon: L.divIcon({ className: 'map-label', html: `<span style="color:${color}">${z.name}</span>`, iconAnchor: [0, -10]}) }).addTo(layers.labels);
+                    if (isDesign) {
+                        poly.on('click', (e) => {
+                            const idx = getInsertIndex(z.points, e.latlng, false);
+                            z.points.splice(idx, 0, [e.latlng.lat, e.latlng.lng]);
+                            renderMap(); updateInspector(); renderLedger();
+                        });
+                        z.points.forEach((pt, idx) => {
+                            createDraggableMarker(pt, 'tac-wp', '', 
+                                (newPos) => { z.points[idx] = newPos; },
+                                () => { if(z.points.length > 2) { z.points.splice(idx, 1); renderMap(); updateInspector(); renderLedger(); } }
+                            ).addTo(layers.zones);
+                        });
+                    }
+                }
+            });
+
+            state.routes.forEach(route => {
+                const routePoints = route.waypoints.map(wp => wp.pos);
+                const routeLine = L.polyline(routePoints, { color: '#4A90E2', weight: 3, opacity: 0.8, interactive: isDesign }).addTo(layers.routes);
+                drawCorridor(routePoints, route.corridorWidthNm);
+                if (isDesign) {
+                    routeLine.on('click', (e) => {
+                        const idx = getInsertIndex(routePoints, e.latlng, false);
+                        route.waypoints.splice(idx, 0, { id: 'wp_new_' + Math.floor(Math.random()*10000), pos: [e.latlng.lat, e.latlng.lng], action: 'TRANSIT' });
+                        renderMap(); updateInspector(); renderLedger();
+                    });
+                }
+                route.waypoints.forEach((wp, index) => {
+                    createDraggableMarker(wp.pos, 'tac-blue tac-wp', String(index+1), 
+                        (newPos) => {
+                            wp.pos = newPos;
+                            if (index === 0) {
+                                const hva = state.forces.blue.find(f => f.id === route.assignedTo[0]);
+                                if (hva) hva.pos = newPos;
+                            }
+                        },
+                        () => {
+                            if(route.waypoints.length > 4) {
+                                route.waypoints.splice(index, 1);
+                                if (index === 0) {
+                                    const hva = state.forces.blue.find(f => f.id === route.assignedTo[0]);
+                                    if (hva) hva.pos = route.waypoints[0].pos;
+                                }
+                                renderMap(); updateInspector(); renderLedger();
+                            }
+                        }
+                    ).addTo(layers.routes);
+                });
+            });
+
+            state.forces.blue.forEach(force => {
+                const iconClass = force.type === 'HVA' ? 'tac-blue tac-hva' : 'tac-blue tac-escort';
+                const label = force.type === 'HVA' ? 'HVA' : 'E';
+                createDraggableMarker(force.pos, iconClass, label, (newPos) => {
+                    force.pos = newPos;
+                    if (force.type === 'HVA') {
+                        state.routes[0].waypoints[0].pos = newPos;
+                    }
+                }, null).addTo(layers.forces);
+            });
+        }
+
+        function updateInspector() {
+            let iniStr = `// Auto-Generated .INI Output\n// -------------------------\n\n`;
+            state.forces.blue.forEach((f, i) => {
+                iniStr += `[Unit_00${i+1}]\nName=${f.name}\nType=${f.type === 'HVA' ? 'Cargo_Large' : 'DDG_Combatant'}\nSide=Blue\nPos_Lat=${f.pos[0].toFixed(4)}\nPos_Lon=${f.pos[1].toFixed(4)}\n\n`;
+            });
+            state.routes[0].waypoints.forEach((wp, i) => {
+                iniStr += `[Waypoint_00${i+1}]\nParent=Unit_001\nAction=${wp.action}\nPos_Lat=${wp.pos[0].toFixed(4)}\nPos_Lon=${wp.pos[1].toFixed(4)}\nSpeed=15\n\n`;
+            });
+
+            // Zone trigger blocks
+            iniStr += `// ── Zone Triggers ──\n\n`;
+            state.zones.forEach((z, i) => {
+                if (z.shape === 'CIRCLE') {
+                    iniStr += `[TriggerArea_${String(i+1).padStart(3,'0')}]\nLabel=${z.name}\nAreaCenterLat=${z.center[0].toFixed(4)}\nAreaCenterLon=${z.center[1].toFixed(4)}\nAreaRadiusNM=${z.radiusNm}\n\n`;
+                }
+                if (z.shape === 'BOX') {
+                    const cLat = ((z.bounds[0][0] + z.bounds[1][0]) / 2).toFixed(4);
+                    const cLon = ((z.bounds[0][1] + z.bounds[1][1]) / 2).toFixed(4);
+                    const rNm = (Math.abs(z.bounds[1][0] - z.bounds[0][0]) * 60 / 2).toFixed(1);
+                    iniStr += `[TriggerArea_${String(i+1).padStart(3,'0')}]\nLabel=${z.name}\nAreaCenterLat=${cLat}\nAreaCenterLon=${cLon}\nAreaRadiusNM=${rNm}\n\n`;
+                }
+                if (z.shape === 'POLYGON') {
+                    iniStr += `// FAC Zone: ${z.name}\n// Vertices: ${z.points.map(p => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(' | ')}\n\n`;
+                }
+            });
+
+            document.getElementById('ini-preview').textContent = iniStr;
+
+            let xmlStr = `<!-- BriefingMap_en.xml Helper -->\n`;
+            state.zones.forEach(z => {
+                if (z.shape === 'CIRCLE') {
+                    xmlStr += `<MapOverlay type="Circle" color="ThreatRed">\n    <Center lat="${z.center[0].toFixed(4)}" lon="${z.center[1].toFixed(4)}" />\n    <Radius nm="${z.radiusNm}" />\n    <Label text="${z.name}" />\n</MapOverlay>\n\n`;
+                }
+                if (z.shape === 'BOX') {
+                    xmlStr += `<MapOverlay type="Rectangle" color="ObjectiveGreen">\n    <Bounds minLat="${z.bounds[0][0]}" minLon="${z.bounds[0][1]}" maxLat="${z.bounds[1][0]}" maxLon="${z.bounds[1][1]}" />\n    <Label text="${z.name}" />\n</MapOverlay>\n\n`;
+                }
+            });
+            document.getElementById('xml-preview').textContent = xmlStr;
+        }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", "mission_export.json");
+            dlAnchorElem.click();
+        }
+
+        function loadJSON(event) {
+            const file = event.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    state = JSON.parse(e.target.result);
+                    renderLedger(); renderMap(); updateInspector();
+                } catch(err) { console.error("Invalid JSON file", err); }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function resetState() {
+            state = JSON.parse(JSON.stringify(defaultState));
+            renderLedger(); renderMap(); updateInspector();
+        }
+
+        function setMode(mode) {
+            window.currentMode = mode;
+            document.body.className = `mode-${mode}`;
+            document.getElementById('btn-design').classList.toggle('active', mode === 'design');
+            document.getElementById('btn-briefing').classList.toggle('active', mode === 'briefing');
+            if (mode === 'briefing') {
+                map.setView(state.viewport.operational.center, state.viewport.operational.zoom);
+                document.getElementById('overlay-title').textContent = `${state.projectMeta.operation}: ${state.projectMeta.mission}`;
+            }
+            renderMap();
+            setTimeout(() => map.invalidateSize(), 300);
+        }
+
+        renderLedger();
+        renderMap();
+        updateInspector();
+    </script>
+</body>
+</html>
